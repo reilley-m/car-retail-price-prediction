@@ -1,0 +1,329 @@
+```{r load packages, include=FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(tidyr)
+library(MASS)
+library(glmnet)
+library(corrplot)
+library(mice)
+```
+
+
+CLEAN AND TRANSFORM
+```{r cars load and clean, }
+#load data
+data <- read.csv("04cars.csv")
+
+# explore structure of the dataset
+summary(data)
+str(data)
+
+#convert all categorical and quantitative variables to factor and numeric respectively
+data$Pickup <- factor(data$Pickup)
+data$Type <- factor(data$Type)
+data$Retailprice <- as.numeric(data$Retailprice)
+data$Sport <- factor(data$Sport)
+data$SUV <- factor(data$SUV)
+data$Wagon <- factor(data$Wagon)
+data$Minivan <- factor(data$Minivan)
+data$Cylinders <- as.numeric(data$Cylinders)
+data$Height <- as.numeric(data$Height)
+data$Horsepower <- as.numeric(data$Horsepower)
+data$CityMPG <- as.numeric(data$CityMPG)
+data$HwyMPG <- as.numeric(data$HwyMPG)
+data$Weight <- as.numeric(data$Weight)
+data$Wheelbase <- as.numeric(data$Wheelbase)
+data$Length <- as.numeric(data$Length)
+#missing values in the data
+sum(is.na(data))
+#impute data using mice function
+imputation_model <- mice(data, method = "lasso.norm", m = 5, maxit = 5)
+# perform imputation
+imputed_data <- complete(imputation_model)
+sum(is.na(imputed_data))
+
+
+```
+
+
+EXPLORE CORRELATIONS
+```{r explore cor}
+#Find high correlations amongst quant variables
+correlation <- cor(imputed_data[, c("Retailprice", "Horsepower", "CityMPG", "HwyMPG", "Weight", "Wheelbase", "Length", "Height")])
+corrplot(correlation, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+```
+
+
+10 FOLD CV for ROBUST REGRESSION
+```{r 10 fold CV for robust}
+
+set.seed(111)
+# find the best robust regression model using rlm and 10-fold cross-validation
+robust_model <- train(
+  Retailprice ~ ., 
+  data = imputed_data, 
+  method = "rlm", 
+  metric = "RMSE",  
+  trControl = trainControl(method = "cv", number = 10),
+  maxit = 100  # Number of tuning iterations
+)
+
+#print best tuning parameter values
+print(paste("Best Tuning Parameters intercept:", robust_model$bestTune$intercept))
+print(paste("Best Tuning Parameters psi:", robust_model$bestTune$psi))
+
+#print cross-validated performance results
+print(min(robust_model$results$RMSE))
+```
+
+
+10 FOLD CV FOR ELASTIC NET
+```{r 10 fold CV for elastic}
+
+# find the best elastic net model using glmnet and 10-fold cross-validation
+
+#list of lambda and alpha parameters to test
+lambda_seq <- 10^seq(-2, 1, length = 100)
+alphalist = c(0,.1,.2,.3,.4,.5,.6,.7,.8,.9,1); n.alpha = length(alphalist)
+set.seed(111)
+
+elastic_net_model <- train(
+  Retailprice ~ .,
+  data = imputed_data,
+  preProc = c("scale", "center"),
+  method = "glmnet",
+  metric = "RMSE", 
+  trControl = trainControl(method = "cv", number = 10), 
+  tuneGrid = expand.grid(alpha=alphalist,lambda=lambda_seq))
+
+#find the lowest RMSE (best model)
+min(elastic_net_model$results$RMSE)
+#extract best tuning parameters
+elastic_net_model$bestTune
+
+
+
+
+```
+
+
+
+5 FOLD DOUBLE CV FOR BOTH MODELS
+```{r 5 fold CV both modeling types}
+#initialize variables for outer CV loop
+n.out = dim(imputed_data)[1]
+#define cross validation splits
+k.out = 5
+#create equal groups
+groups = rep(1:k.out, length = n.out)
+set.seed(111)
+cvgroups = sample(groups, n.out)
+
+#initialize lists to store results
+allpredictedCV = rep(NA, n.out) #outer loop
+allbestPars = vector("list", k.out) #store best parameters for each fold
+allRMSE = numeric(k.out) #store rmse for each fold
+
+for (j in 1:k.out) {
+  groupj = (cvgroups == j)
+  #define training group set
+  traindata = imputed_data[!groupj, ]
+  #define validation set
+  validdata = imputed_data[groupj, ]
+  set.seed(111)
+  
+  # Robust Regression Model
+  robust_model <- train(
+    Retailprice ~ .,
+    data = traindata,
+    method = "rlm",
+    metric = "RMSE",
+    trControl = trainControl(method = "cv", number = 10),
+    maxit = 100
+  )
+  
+  # Elastic Net Model
+  lambda_seq <- 10^seq(-2, 1, length = 100)
+  alphalist = c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
+  elastic_net_model <- train(
+    Retailprice ~ .,
+    data = traindata,
+    preProc = c("scale", "center"),
+    method = "glmnet",
+    metric = "RMSE",
+    trControl = trainControl(method = "cv", number = 10),
+    tuneGrid = expand.grid(alpha = alphalist, lambda = lambda_seq)
+  )
+  #Print the best RMSE value for each model every loop
+  print(min(robust_model$results$RMSE))
+  print(min(elastic_net_model$results$RMSE))
+  # check which model has the lowest RMSE and print its bestTune parameters
+  if (min(robust_model$results$RMSE) < min(elastic_net_model$results$RMSE)) {
+    best_model <- robust_model
+    model_type <- "Robust Regression"
+  } else {
+    best_model <- elastic_net_model
+    model_type <- "Elastic Net"
+  }
+  
+  #Store best model tuning parameters for this fold
+  allbestPars[[j]] <- best_model$bestTune
+  print(paste("Fold", j, "- Winning Model Type:", model_type))
+
+  #Use best model to predict on the hold-out test set from the outer fold
+  test_predictions <- predict(best_model, newdata = validdata)
+
+  #Store predictions in allpredictedCV vector
+  allpredictedCV[groupj] <- test_predictions
+
+  #Calculate and store RMSE for the predictions on the outer fold test set
+  rmse_outer <- sqrt(mean((validdata$Retailprice - test_predictions)^2))
+  allRMSE[j] <- rmse_outer
+  print(paste("Fold", j, "- Outer RMSE:", rmse_outer))
+  
+}
+
+#Print the overall RMSE and the other metrics
+overall_rmse <- sqrt(mean((imputed_data$Retailprice - allpredictedCV)^2))
+print(paste("Overall RMSE from Double CV:", overall_rmse))
+```
+
+PLOT ACTUAL VERSUS PREDICTED
+```{r}
+# Plot actual vs predicted values
+ggplot(data.frame(Actual = imputed_data$Retailprice, Predicted = allpredictedCV), aes(x = Actual, y = Predicted)) +
+  geom_point(color = "blue", size = 3) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Actual vs Predicted Retail Prices", x = "Actual Retail Price", y = "Predicted Retail Price") +
+  theme_minimal()
+
+```
+EXPLORE BEST MODEL
+```{r get predicted values from best model}
+#fit the winning model(elastic net) with best alpha
+set.seed(111)
+model_final = train(Retailprice ~., data = imputed_data, method = "glmnet", preProc = c("scale", "center"), tuneGrid = expand.grid(alpha = 0, lambda = lambda_seq))
+#get predicted values from the best model
+predicted = predict(model_final, newdata = validdata)
+
+#add predicted values to validdata
+predictedvactual <- cbind(predicted, validdata)
+```
+
+
+```{r find top predictors}
+#set x and y for glmnet
+x = model.matrix(Retailprice~.,data=imputed_data)[,-1]
+y = imputed_data$Retailprice
+#scale x and y
+scaled_x = scale(x)
+scaled_y = scale(y)
+#create final best model
+model_elastic = glmnet(scaled_x, scaled_y, alpha = 0.1, lambda = lambda_seq)
+#examine coefficients, decrease lambda value to find top two predictors
+coef(model_elastic, s = 6)
+```
+
+
+
+
+```{r best model r^2}
+#calculate R^2 for best model elastic net
+ss_total <- sum((validdata$Retailprice - mean(validdata$Retailprice))^2)
+ss_residual <- sum((validdata$Retailprice - predicted)^2)
+rsquared <- 1 - (ss_residual / ss_total)
+print(paste("R-squared:", rsquared))
+#the amount of variance that can be predicted by the model is 78%
+```
+
+```{r best model RMSE}
+# Calculate RMSE of the best model
+rmse <- sqrt(mean((predicted - validdata$Retailprice)^2))
+print(paste("RMSE:", rmse))
+#the RMSE for optimized elastic net model is 8539
+```
+
+COMPARE ROBUST MODEL TO BEST MODEL
+```{r get predicted values from robust model}
+#explore best robust regression model to compare to elastic net model
+robust_model_final <- train(
+    Retailprice ~ .,
+    data = traindata,
+    method = "rlm",
+    metric = "RMSE",
+    trControl = trainControl(method = "cv", number = 10),
+    maxit = 100)
+#extract robust regression predictions
+predicted_robust = predict(robust_model_final, newdata = validdata)
+#crate new dataset with predicted robust data
+predicted_robust_data <- cbind(predicted_robust, validdata)
+```
+
+```{r robust rmse}
+#Calculate RMSE for robust regression model
+rmse <- sqrt(mean((predicted_robust - validdata$Retailprice)^2))
+print(paste("RMSE:", rmse))
+#the RMSE for optimal robust regression model is 8935
+```
+
+```{r robust r^2}
+#Find R^2 value for robust regression model
+ss_total2 <- sum((validdata$Retailprice - mean(validdata$Retailprice))^2)
+ss_residual2 <- sum((validdata$Retailprice - predicted_robust)^2)
+rsquared2 <- 1 - (ss_residual2 / ss_total2)
+print(paste("R-squared:", rsquared2))
+#the amount of variance that can be predicted by the model is 76%
+```
+
+EXPLORE TOP PREDICTORS
+```{r elastic net predicted retail price v horsepower}
+
+# Create a scatter plot with Horsepower on the x-axis and Predicted Retail Price on the y-axis
+ggplot(predictedvactual, aes(x = Horsepower, y = predicted)) +
+  geom_point(size = 3, color = "blue") +
+  labs(x = "Horsepower", y = "Predicted Retail Price") +
+  ggtitle("Relationship between Horsepower and Predicted Retail Price") +
+  theme_minimal()
+#almost perfectly linear relationship
+```
+
+```{r elastic net predicted retail price v cylinders}
+# Create a scatter plot with Predicted Retail Price on the y-axis and Cylinders on the x-axis
+ggplot(predictedvactual, aes(x = Cylinders, y = predicted)) +
+  geom_point(size = 3, color = "purple") +
+  labs(x = "Cylinders", y = "Predicted Retail Price") +
+  ggtitle("Relationship between Cylinders and Predicted Retail Price") +
+  theme_minimal()
+#linear relationship
+```
+
+```{r actual v predicted scatterplot elastic net}
+#Create scatterplot of Actual Retail Price values on the x axis and Predicted Retail on y axis
+ggplot(predictedvactual, aes(x = Retailprice, y = predicted)) +
+  geom_point(size = 3, color = "green") +
+  labs(x = "Actual Retail Price", y = "Predicted Retail Price") +
+  ggtitle("Relationship between Actual and Predicted Retail Price") +
+  theme_minimal()
+```
+```{r elastic net model qq}
+#Create qqplot of predicted values from best model
+qqnorm(predicted)
+qqline(predicted, col = 2)
+```
+```{r actual v predicted robust}
+#Create histogram of actual v predicted values from robust regression
+ggplot(predicted_robust_data, aes(x = predicted_robust, y = Retailprice)) +
+  geom_point(size = 3, color = "red") +
+  labs(x = "Actual Retail Price", y = "Predicted Retail Price") +
+  ggtitle("Relationship between Actual and Predicted Retail Price") +
+  theme_minimal()
+#looks very similar to elastic net predictions
+```
+
+```{r qq robust}
+#Create qqplot of predicted values from robust regression model
+qqnorm(predicted_robust)
+qqline(predicted_robust, col = 2)
+```
