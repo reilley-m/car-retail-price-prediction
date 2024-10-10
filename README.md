@@ -29,13 +29,13 @@ These results suggest that more powerful cars tend to be more expensive, alignin
 Here are some of the key visualizations from the project:
 
 ### Correlation Matrix
-![Correlation Matrix](visualizations/correlation_matrix.png)
+![Correlation Matrix](visualizations/corrplotcars.png)
 
 ### Predicted vs Actual Retail Prices
 ![Predicted vs Actual Retail Prices](visualizations/predicted_vs_actual.png)
 
 ### QQ Plot
-![QQ Plot](visualizations/qq_plot.png)
+![QQ Plot](visualizations/qqplot.png)
 
 ## Conclusion
 My analysis explored the relationships involved in predicting car retail prices. Despite strong predictive power, the model could be improved by incorporating additional variables like car make and model. Future research could focus on making these enhancements to better capture the factors influencing high retail prices.
