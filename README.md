@@ -32,7 +32,7 @@ Here are some of the key visualizations from the project:
 ![Correlation Matrix](visualizations/corrplotcars.png)
 
 ### Predicted vs Actual Retail Prices
-![Predicted vs Actual Retail Prices](visualizations/predicted_vs_actual.png)
+![Predicted vs Actual Retail Prices](visualizations/predicted_versus_actual.png)
 
 ### QQ Plot
 ![QQ Plot](visualizations/qqplot.png)
