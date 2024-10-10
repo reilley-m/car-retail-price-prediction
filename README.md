@@ -1,9 +1,9 @@
 # car-retail-price-prediction
-Predictive Insights into Car Retail Pricing Using Elastic Net and Robust Regression
-# Predictive Insights into Car Retail Pricing
+
+# Predictive Insights into Car Retail Pricing Using Elastic Net and Robust Regression
 
 ## Introduction
-In the automotive industry, understanding the dynamics of retail prices is essential for manufacturers, dealers, and consumers. This project utilizes the power of predictive modeling to unveil the patterns and relationships that drive vehicle pricing. Using data cleaning, feature engineering, and model selection techniques, we have built a model that predicts car retail prices based on various attributes.
+In the automotive industry, understanding the dynamics of retail prices is essential for manufacturers, dealers, and consumers. This project utilizes predictive modeling to uncover patterns and relationships that drive vehicle pricing. Using data cleaning, feature engineering, and model selection techniques, I have built a model that predicts car retail prices based on various attributes.
 
 ## Data Cleaning
 Several data cleaning steps were performed to ensure data quality and reliability:
